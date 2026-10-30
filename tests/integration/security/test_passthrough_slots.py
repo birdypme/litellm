@@ -17,7 +17,6 @@ sweep may find any of the three canaries.
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import json
 from collections.abc import Iterator, Mapping
@@ -27,13 +26,8 @@ from pathlib import Path
 from typing import Final, Literal
 
 import httpx
-import litellm
 import pytest
-from fastapi import Request as FastAPIRequest, Response
-from litellm import Router
 from litellm.integrations.custom_logger import CustomLogger
-from litellm_enterprise.enterprise_callbacks.secret_detection import _ENTERPRISE_SecretDetection
-from starlette.datastructures import URL
 from integration._support.client import Scenario, eventually
 from integration._support.database import read_rows
 from integration._support.wire import Reply, Request, wire_server
@@ -274,82 +268,6 @@ class _SecretDetectionRecorder(CustomLogger):
         self.logged_messages = kwargs.get("messages")
 
 
-@pytest.mark.asyncio
-async def test_secret_detection_redacts_the_logged_request(monkeypatch: pytest.MonkeyPatch) -> None:
-    from litellm.proxy import proxy_server
-
-    def upstream(request: Request) -> Reply:
-        assert request.target.endswith("/chat/completions")
-        assert json.loads(request.body)["model"] == "fake"
-        assert json.loads(request.body)["messages"] == [
-            {"role": "user", "content": "Hello here is my OPENAI_API_KEY = [REDACTED]"}
-        ]
-        return Reply(
-            body=json.dumps(
-                {
-                    "id": "chatcmpl-secret-detection",
-                    "object": "chat.completion",
-                    "created": 1,
-                    "model": "fake-model",
-                    "choices": [
-                        {
-                            "index": 0,
-                            "finish_reason": "stop",
-                            "message": {"role": "assistant", "content": "ok"},
-                        }
-                    ],
-                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-                }
-            ).encode()
-        )
-
-    recorder: Final = _SecretDetectionRecorder()
-    monkeypatch.setattr(litellm, "callbacks", [_ENTERPRISE_SecretDetection(), recorder])
-    prompt: Final = "Hello here is my OPENAI_API_KEY = sk-98765"
-
-    with wire_server(upstream) as wire:
-        router: Final = Router(
-            model_list=[
-                {
-                    "model_name": "fake-model",
-                    "litellm_params": {"model": "openai/fake", "api_base": wire.url, "api_key": "sk-fake"},
-                }
-            ]
-        )
-        monkeypatch.setattr(proxy_server, "llm_router", router)
-        request: Final = FastAPIRequest(
-            scope={
-                "type": "http",
-                "method": "POST",
-                "path": "/chat/completions",
-                "headers": [(b"content-type", b"application/json")],
-                "query_string": b"",
-            }
-        )
-        request._url = URL(url="/chat/completions")
-
-        async def return_body() -> bytes:
-            return json.dumps(
-                {"model": "fake-model", "messages": [{"role": "user", "content": prompt}]}
-            ).encode()
-
-        request.body = return_body
-        from litellm.proxy._types import UserAPIKeyAuth
-        from litellm.proxy.proxy_server import chat_completion
-
-        await chat_completion(
-            request=request,
-            user_api_key_dict=UserAPIKeyAuth(api_key="sk-fake", token="hashed_sk-fake"),
-            fastapi_response=Response(),
-        )
-        for _ in range(100):
-            if recorder.logged_messages is not None:
-                break
-            await asyncio.sleep(0)
-
-    assert recorder.logged_messages == [
-        {"role": "user", "content": "Hello here is my OPENAI_API_KEY = [REDACTED]"}
-    ]
 
 
 def _spend_row(marker: Canary, since: datetime) -> str:

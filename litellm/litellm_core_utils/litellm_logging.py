@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime as dt_object
 from functools import lru_cache
 from types import MappingProxyType, TracebackType
-from typing import TYPE_CHECKING, Any, Final, Literal, NamedTuple, cast
+from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 from httpx import Response, Timeout
 from pydantic import BaseModel, JsonValue, TypeAdapter
@@ -253,57 +253,8 @@ if TYPE_CHECKING:
     from litellm.litellm_core_utils.llm_cost_calc.utils import BilledTokenRates
     from litellm.llms.base_llm.passthrough.transformation import PassthroughStreamCollector
     from litellm.proxy.hooks.autorouter_baseline_cache import BaselineCacheContext, CapturedBaselineObservation
-try:
-    from litellm_enterprise.enterprise_callbacks.callback_controls import (
-        EnterpriseCallbackControls,
-    )
-    from litellm_enterprise.litellm_core_utils.litellm_logging import (
-        StandardLoggingPayloadSetup as EnterpriseStandardLoggingPayloadSetup,
-    )
+from litellm.integrations.generic_api.generic_api_callback import GenericAPILogger
 
-    from litellm.integrations.generic_api.generic_api_callback import GenericAPILogger
-
-    EnterpriseStandardLoggingPayloadSetupVAR: type[EnterpriseStandardLoggingPayloadSetup] | None = (
-        EnterpriseStandardLoggingPayloadSetup
-    )
-except Exception as e:
-    verbose_logger.debug("[Non-Blocking] Unable to import GenericAPILogger - LiteLLM Enterprise Feature - %s", e)
-    GenericAPILogger = CustomLogger
-    EnterpriseCallbackControls = None
-    EnterpriseStandardLoggingPayloadSetupVAR = None
-
-
-class _EnterpriseAlertingLoggers(NamedTuple):
-    pagerduty: type[CustomLogger]
-    resend_email: type[CustomLogger]
-    sendgrid_email: type[CustomLogger]
-    smtp_email: type[CustomLogger]
-
-
-@functools.cache
-def _enterprise_alerting_loggers() -> _EnterpriseAlertingLoggers:
-    try:
-        from litellm_enterprise.enterprise_callbacks.pagerduty.pagerduty import PagerDutyAlerting
-        from litellm_enterprise.enterprise_callbacks.send_emails.resend_email import ResendEmailLogger
-        from litellm_enterprise.enterprise_callbacks.send_emails.sendgrid_email import SendGridEmailLogger
-        from litellm_enterprise.enterprise_callbacks.send_emails.smtp_email import SMTPEmailLogger
-    except Exception as e:
-        verbose_logger.debug(
-            "[Non-Blocking] Unable to import enterprise alerting loggers - LiteLLM Enterprise Feature - %s",
-            e,
-        )
-        return _EnterpriseAlertingLoggers(CustomLogger, CustomLogger, CustomLogger, CustomLogger)
-    return _EnterpriseAlertingLoggers(PagerDutyAlerting, ResendEmailLogger, SendGridEmailLogger, SMTPEmailLogger)
-
-
-if TYPE_CHECKING:
-    from litellm.integrations.generic_api.generic_api_callback import (
-        GenericAPILogger as _GenericAPILoggerCls,
-    )
-
-    _GENERIC_API_LOGGER_CLS: Final = _GenericAPILoggerCls
-else:
-    _GENERIC_API_LOGGER_CLS: Final = GenericAPILogger
 _in_memory_loggers: Final[list[CustomLogger]] = []
 
 _STANDARD_LOGGING_METADATA_RESOLVED_KEYS: Final[frozenset[str]] = frozenset(
@@ -2652,17 +2603,6 @@ class Logging(LiteLLMLoggingBaseClass):
             if not (isinstance(callback, CustomLogger) and "_PROXY_" in callback.__class__.__name__):
                 verbose_logger.debug("no-log request, skipping logging for %s event", event_hook)
                 return False
-
-        # Check for dynamically disabled callbacks via headers
-        if EnterpriseCallbackControls is not None and EnterpriseCallbackControls.is_callback_disabled_dynamically(
-            callback=callback,
-            litellm_params=litellm_params,
-            standard_callback_dynamic_params=self.standard_callback_dynamic_params,
-        ):
-            verbose_logger.debug(
-                "Callback %s disabled via x-litellm-disable-callbacks header for %s event", callback, event_hook
-            )
-            return False
 
         return True
 
@@ -5725,14 +5665,6 @@ def build_custom_logger_compatible_class(
         _otel_logger = WeaveOtelLogger(config=otel_config, callback_name="weave_otel")
         _in_memory_loggers.append(_otel_logger)
         return _otel_logger
-    elif logging_integration == "pagerduty":
-        pagerduty_loggers: Final = _enterprise_alerting_loggers()
-        for callback in _in_memory_loggers:
-            if isinstance(callback, pagerduty_loggers.pagerduty):
-                return callback
-        pagerduty_logger: Final = pagerduty_loggers.pagerduty(**custom_logger_init_args_value)
-        _in_memory_loggers.append(pagerduty_logger)
-        return pagerduty_logger
     elif logging_integration == "anthropic_cache_control_hook":
         for callback in _in_memory_loggers:
             if isinstance(callback, AnthropicCacheControlHook):
@@ -5760,35 +5692,11 @@ def build_custom_logger_compatible_class(
         return _gcs_pubsub_logger
     elif logging_integration == "generic_api":
         for callback in _in_memory_loggers:
-            if isinstance(callback, _GENERIC_API_LOGGER_CLS):
+            if isinstance(callback, GenericAPILogger):
                 return callback
         generic_api_logger: Final = GenericAPILogger()
         _in_memory_loggers.append(generic_api_logger)
         return generic_api_logger
-    elif logging_integration == "resend_email":
-        resend_email_loggers: Final = _enterprise_alerting_loggers()
-        for callback in _in_memory_loggers:
-            if isinstance(callback, resend_email_loggers.resend_email):
-                return callback
-        resend_email_logger: Final = resend_email_loggers.resend_email()
-        _in_memory_loggers.append(resend_email_logger)
-        return resend_email_logger
-    elif logging_integration == "sendgrid_email":
-        sendgrid_email_loggers: Final = _enterprise_alerting_loggers()
-        for callback in _in_memory_loggers:
-            if isinstance(callback, sendgrid_email_loggers.sendgrid_email):
-                return callback
-        sendgrid_email_logger: Final = sendgrid_email_loggers.sendgrid_email()
-        _in_memory_loggers.append(sendgrid_email_logger)
-        return sendgrid_email_logger
-    elif logging_integration == "smtp_email":
-        smtp_email_loggers: Final = _enterprise_alerting_loggers()
-        for callback in _in_memory_loggers:
-            if isinstance(callback, smtp_email_loggers.smtp_email):
-                return callback
-        smtp_email_logger: Final = smtp_email_loggers.smtp_email()
-        _in_memory_loggers.append(smtp_email_logger)
-        return smtp_email_logger
     elif logging_integration == "humanloop":
         for callback in _in_memory_loggers:
             if isinstance(callback, HumanloopLogger):
@@ -6228,11 +6136,6 @@ def get_custom_logger_compatible_class(
             for callback in _in_memory_loggers:
                 if isinstance(callback, MlflowLogger):
                     return callback
-        elif logging_integration == "pagerduty":
-            pagerduty_loggers: Final = _enterprise_alerting_loggers()
-            for callback in _in_memory_loggers:
-                if isinstance(callback, pagerduty_loggers.pagerduty):
-                    return callback
         elif logging_integration == "anthropic_cache_control_hook":
             for callback in _in_memory_loggers:
                 if isinstance(callback, AnthropicCacheControlHook):
@@ -6251,22 +6154,7 @@ def get_custom_logger_compatible_class(
                     return callback
         elif logging_integration == "generic_api":
             for callback in _in_memory_loggers:
-                if isinstance(callback, _GENERIC_API_LOGGER_CLS):
-                    return callback
-        elif logging_integration == "resend_email":
-            resend_email_loggers: Final = _enterprise_alerting_loggers()
-            for callback in _in_memory_loggers:
-                if isinstance(callback, resend_email_loggers.resend_email):
-                    return callback
-        elif logging_integration == "sendgrid_email":
-            sendgrid_email_loggers: Final = _enterprise_alerting_loggers()
-            for callback in _in_memory_loggers:
-                if isinstance(callback, sendgrid_email_loggers.sendgrid_email):
-                    return callback
-        elif logging_integration == "smtp_email":
-            smtp_email_loggers: Final = _enterprise_alerting_loggers()
-            for callback in _in_memory_loggers:
-                if isinstance(callback, smtp_email_loggers.smtp_email):
+                if isinstance(callback, GenericAPILogger):
                     return callback
         elif logging_integration == "newrelic":
             from litellm.integrations.otel.logger import OpenTelemetryV2
@@ -6589,12 +6477,6 @@ class StandardLoggingPayloadSetup:
                 and isinstance(_potential_requester_metadata, dict)
             ):
                 clean_metadata["requester_metadata"] = _potential_requester_metadata
-
-        if EnterpriseStandardLoggingPayloadSetupVAR and proxy_server_request is not None:
-            clean_metadata = EnterpriseStandardLoggingPayloadSetupVAR.apply_enterprise_specific_metadata(
-                standard_logging_metadata=clean_metadata,
-                proxy_server_request=proxy_server_request,
-            )
 
         # Generate cold storage object key if cold storage is configured
         if start_time is not None and response_id is not None:

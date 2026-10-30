@@ -222,8 +222,6 @@ graph LR
 | `reset_budget` | 10-12min | Reset budgets for keys/users/teams | `proxy/common_utils/reset_budget_job.py` |
 | `add_deployment` | 10s | Sync new model deployments from DB | `proxy/proxy_server.py` (`ProxyConfig`) |
 | `cleanup_old_spend_logs` | cron/interval | Delete old spend logs | `proxy/db/db_transaction_queue/spend_log_cleanup.py` |
-| `check_batch_cost` | 30min | Calculate costs for batch jobs | `enterprise/litellm_enterprise/proxy/common_utils/check_batch_cost.py` |
-| `check_responses_cost` | 30min | Calculate costs for responses API | `enterprise/litellm_enterprise/proxy/common_utils/check_responses_cost.py` |
 | `process_rotations` | 1hr | Auto-rotate API keys | `proxy/common_utils/key_rotation_manager.py` |
 | `_run_background_health_check` | continuous | Health check model deployments | `proxy/proxy_server.py` |
 | `send_weekly_spend_report` | weekly | Slack spend alerts | `proxy/utils.py` (`SlackAlerting`) |

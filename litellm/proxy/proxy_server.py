@@ -1078,30 +1078,6 @@ from fastapi.security import OAuth2PasswordBearer
 from fastapi.security.api_key import APIKeyHeader
 from fastapi.staticfiles import StaticFiles
 
-# import enterprise folder
-enterprise_router = APIRouter()
-try:
-    # when using litellm cli
-    from litellm.proxy import enterprise
-except Exception:
-    # when using litellm docker image
-    try:
-        import enterprise
-    except Exception:
-        pass
-
-###################
-# Import enterprise routes
-try:
-    from litellm_enterprise.proxy.enterprise_routes import router as _enterprise_router
-    from litellm_enterprise.proxy.proxy_server import EnterpriseProxyConfig
-
-    enterprise_router = _enterprise_router
-    enterprise_proxy_config: EnterpriseProxyConfig | None = EnterpriseProxyConfig()
-except ImportError:
-    enterprise_proxy_config = None
-###################
-
 server_root_path: Final = get_server_root_path()
 _license_check = LicenseCheck()
 premium_user: bool = _license_check.is_premium()
@@ -7102,9 +7078,6 @@ class ProxyConfig:
                     config_file_path=config_file_path,
                 )
 
-            if enterprise_proxy_config is not None:
-                await enterprise_proxy_config.load_enterprise_config(general_settings)
-
             ## pass through endpoints
             if general_settings.get("pass_through_endpoints", None) is not None:
                 config_passthrough_endpoints = general_settings["pass_through_endpoints"]
@@ -11536,66 +11509,6 @@ class ProxyStartupEvent:
                     )
         if _wants_cleanup_jobs(cleanup_settings):
             proxy_config.record_cleanup_schedule_attempt(cleanup_settings)
-        ### CHECK BATCH COST ###
-        if llm_router is not None and PROXY_BATCH_POLLING_ENABLED:
-            try:
-                from litellm_enterprise.proxy.common_utils.check_batch_cost import (
-                    CheckBatchCost,
-                )
-
-                check_batch_cost_job: Final = CheckBatchCost(
-                    proxy_logging_obj=proxy_logging_obj,
-                    prisma_client=prisma_client,
-                    llm_router=llm_router,
-                    track_unmanaged_batch_cost=general_settings.get("track_unmanaged_batch_cost", False),
-                )
-                await check_batch_cost_job.confirm_batch_processed_support()
-                scheduler.add_job(
-                    check_batch_cost_job.check_batch_cost,
-                    "interval",
-                    seconds=proxy_batch_polling_interval + random.randint(0, 30),  # Add small random offset
-                    # REMOVED jitter parameter - major cause of memory leak
-                    id="check_batch_cost_job",
-                    replace_existing=True,
-                    misfire_grace_time=APSCHEDULER_MISFIRE_GRACE_TIME,
-                )
-                verbose_proxy_logger.info("Batch cost check job scheduled successfully")
-
-            except Exception as e:
-                verbose_proxy_logger.debug("Failed to setup batch cost checking: %s", e)
-                verbose_proxy_logger.debug(
-                    "Checking batch cost for LiteLLM Managed Files is an Enterprise Feature. Skipping..."
-                )
-
-        ### CHECK RESPONSES COST ###
-        if llm_router is not None and PROXY_BATCH_POLLING_ENABLED:
-            try:
-                from litellm_enterprise.proxy.common_utils.check_responses_cost import (
-                    CheckResponsesCost,
-                )
-
-                check_responses_cost_job: Final = CheckResponsesCost(
-                    proxy_logging_obj=proxy_logging_obj,
-                    prisma_client=prisma_client,
-                    llm_router=llm_router,
-                )
-                scheduler.add_job(
-                    check_responses_cost_job.check_responses_cost,
-                    "interval",
-                    seconds=proxy_batch_polling_interval + random.randint(0, 30),  # Add small random offset
-                    # REMOVED jitter parameter - major cause of memory leak
-                    id="check_responses_cost_job",
-                    replace_existing=True,
-                    misfire_grace_time=APSCHEDULER_MISFIRE_GRACE_TIME,
-                )
-                verbose_proxy_logger.info("Responses cost check job scheduled successfully")
-
-            except Exception as e:
-                verbose_proxy_logger.debug("Failed to setup responses cost checking: %s", e)
-                verbose_proxy_logger.debug(
-                    "Checking responses cost for LiteLLM Managed Files is an Enterprise Feature. Skipping..."
-                )
-
         # MEMORY LEAK FIX: Start scheduler with paused=False to avoid backlog processing
         # Do NOT reset job times to "now" as this can trigger the memory leak
         # The misfire_grace_time and coalesce settings will handle any missed runs properly
@@ -20627,7 +20540,7 @@ def _is_litellm_internal_callback(callback_name: str, callback: CustomLogger | C
 
     module_owner: Final = _callback_module_name(callback).partition(".")[0]
     is_registered_integration: Final = callback_name in CustomLoggerRegistry.CALLBACK_CLASS_STR_TO_CLASS_TYPE
-    return not is_registered_integration and module_owner in ("litellm", "litellm_enterprise")
+    return not is_registered_integration and module_owner == "litellm"
 
 
 def _is_instance_of_configured_callback(
@@ -21529,7 +21442,6 @@ app.include_router(user_agent_analytics_router)
 app.include_router(gateway_request_router)
 app.include_router(request_error_router)
 app.include_router(telemetry_router)
-app.include_router(enterprise_router)
 app.include_router(ui_discovery_endpoints_router)
 app.include_router(agent_skills_discovery_router)
 # Eager: /models/{name}:method overlaps with the OpenAI /models endpoint.

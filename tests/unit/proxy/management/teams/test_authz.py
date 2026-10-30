@@ -135,9 +135,3 @@ def test_team_access_denied_is_the_403_management_routes_have_always_raised() ->
     assert denied.value.status_code == 403
     assert denied.value.detail == "You do not have access to this team"
 
-
-def test_the_old_access_module_still_serves_the_published_enterprise_wheel() -> None:
-    from litellm.proxy.management.teams import access, authz
-
-    assert access.is_team_admin is authz.is_team_admin
-    assert set(access.__all__) <= set(dir(authz))

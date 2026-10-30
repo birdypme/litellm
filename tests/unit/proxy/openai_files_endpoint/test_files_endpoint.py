@@ -1,7 +1,6 @@
-import json
 from typing import Final, List, Optional
 from urllib.parse import quote
-from unittest.mock import ANY, AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import respx
@@ -13,9 +12,7 @@ from pytest_mock import MockerFixture
 import litellm
 from litellm import Router
 from litellm.files.types import FileContentStreamingResult
-from litellm.proxy._types import LiteLLM_UserTableFiltered, LitellmUserRoles, UserAPIKeyAuth
-from litellm.proxy.hooks import get_proxy_hook
-from litellm.proxy.management_endpoints.internal_user_endpoints import ui_view_users
+from litellm.proxy._types import LitellmUserRoles, UserAPIKeyAuth
 from litellm.proxy.openai_files_endpoints.file_content_streaming_handler import (
     FileContentStreamingHandler,
 )
@@ -28,7 +25,6 @@ from litellm.types.llms.openai import (
 
 client = TestClient(app)
 from litellm.caching.caching import DualCache
-from litellm.proxy.proxy_server import hash_token
 from litellm.proxy.utils import ProxyLogging
 
 VALID_BATCH_LINE = (
@@ -350,7 +346,6 @@ def test_mock_create_audio_file(mocker: MockerFixture, monkeypatch, llm_router: 
     """
     import litellm
     import litellm.proxy.proxy_server as ps
-    from litellm import Router
     from litellm.proxy._types import LitellmUserRoles
     from litellm.proxy.utils import ProxyLogging
 
@@ -1145,7 +1140,7 @@ def test_create_file_for_each_model(
         create_file_for_each_model,
     )
     from litellm.proxy.utils import ProxyLogging
-    from litellm.types.llms.openai import OpenAIFileObject, OpenAIFilesPurpose
+    from litellm.types.llms.openai import OpenAIFileObject
 
     # Setup proxy logging
     proxy_logging_obj = ProxyLogging(
@@ -4126,97 +4121,6 @@ def test_require_managed_files_rejects_raw_provider_file_id(
     mock_call.assert_not_called()
 
 
-def test_get_file_content_model_routed_attaches_trusted_model_credentials(monkeypatch):
-    """A managed batch output id routes by model, and that branch must build the snapshot.
-
-    The managed-files pre-call hook sets data["model"] for any id carrying
-    llm_output_file_id, so batch output retrieval always takes the model-routed branch
-    and never reaches managed_files_obj.afile_content. Bedrock resolves its output
-    bucket only from _litellm_internal_model_credentials, so without the snapshot every
-    Bedrock batch output retrieval fails with "S3 bucket_name is required".
-    """
-    import base64
-    from types import MappingProxyType
-
-    import litellm.proxy.proxy_server as ps
-    from litellm.proxy._types import LitellmUserRoles
-    from litellm.types.utils import SpecialEnums
-
-    router = Router(
-        model_list=[
-            {
-                "model_name": "anthropic.batch.claude-4.5-haiku",
-                "litellm_params": {
-                    "model": "bedrock/anthropic.claude-haiku-4-5-20251001-v1:0",
-                    "aws_region_name": "us-east-1",
-                    "s3_bucket_name": "configured-batch-bucket",
-                },
-                "model_info": {"id": "bedrock-batch-deployment-id"},
-            }
-        ]
-    )
-
-    from unittest.mock import MagicMock
-
-    managed_file_row = MagicMock()
-    managed_file_row.created_by = "test-user"
-    managed_file_row.team_id = None
-    managed_file_row.storage_backend = None
-    managed_file_row.storage_url = None
-    prisma_stub = MagicMock()
-    prisma_stub.db.litellm_managedfiletable.find_first = AsyncMock(return_value=managed_file_row)
-
-    monkeypatch.setattr("litellm.proxy.proxy_server.prisma_client", prisma_stub)
-    setup_proxy_logging_object(monkeypatch, router)
-    monkeypatch.setattr("litellm.proxy.proxy_server.master_key", None)
-    monkeypatch.setattr("litellm.proxy.proxy_server.llm_router", router)
-
-    # One frozen snapshot per call rather than one dict merged across calls, so a second
-    # invocation is visible instead of silently overwriting the first.
-    calls: list[MappingProxyType] = []
-
-    async def _mock_router_afile_content(**kwargs):
-        calls.append(MappingProxyType(dict(kwargs)))
-        return HttpxBinaryResponseContent(
-            response=httpx.Response(
-                status_code=200,
-                content=b'{"recordId":"req-1"}',
-                headers={"content-type": "application/octet-stream"},
-            )
-        )
-
-    monkeypatch.setattr(router, "afile_content", _mock_router_afile_content)
-
-    unified_id = SpecialEnums.LITELLM_MANAGED_FILE_COMPLETE_STR.value.format(
-        "application/jsonl",
-        "unified-output-id",
-        "anthropic.batch.claude-4.5-haiku",
-        "llm_output_file_id,s3://configured-batch-bucket/out/batch.jsonl",
-        "bedrock-batch-deployment-id",
-    )
-    encoded_id = base64.urlsafe_b64encode(unified_id.encode()).decode().rstrip("=")
-
-    app.dependency_overrides[ps.user_api_key_auth] = lambda: UserAPIKeyAuth(
-        api_key="test-key",
-        user_role=LitellmUserRoles.PROXY_ADMIN,
-        user_id="test-user",
-    )
-    try:
-        response = client.get(
-            f"/v1/files/{encoded_id}/content",
-            headers={"Authorization": "Bearer test-key", "custom-llm-provider": "bedrock"},
-        )
-    finally:
-        app.dependency_overrides.pop(ps.user_api_key_auth, None)
-
-    assert response.status_code == 200, response.text
-    assert len(calls) == 1, f"expected exactly one routed retrieval, got {len(calls)}"
-    snapshot = calls[0].get("_litellm_internal_model_credentials")
-    assert snapshot is not None, "model-routed branch must attach the trusted credential snapshot"
-    assert isinstance(
-        snapshot, MappingProxyType
-    ), "snapshot must be a MappingProxyType; a plain dict is rejected by get_configured_s3_bucket_name"
-    assert snapshot["s3_bucket_name"] == "configured-batch-bucket"
 
 
 def _unified_managed_file_id() -> str:
@@ -5021,121 +4925,14 @@ class _ManagedFileTableOverRows:
         return rows if take is None else rows[:take]
 
 
-def _setup_unscoped_list_files_route_over_real_hook(
-    mocker, monkeypatch, llm_router: Router, rows
-):
-    """Wire GET /v1/files to a real managed-files hook over `rows`, with no provider
-    credentials in the process. The neighbouring setup stubs the hook with a
-    MagicMock, so it cannot see anything past the route's argument plumbing."""
-    import litellm.proxy.proxy_server as ps
-    from litellm.proxy._types import LitellmUserRoles
-    from litellm_enterprise.proxy.hooks.managed_files import (
-        PROXY_LiteLLMManagedFiles,
-    )
-
-    for env_var in ("OPENAI_API_KEY", "OPENAI_ADMIN_KEY", "OPENAI_ORGANIZATION"):
-        monkeypatch.delenv(env_var, raising=False)
-    monkeypatch.setattr(litellm, "api_key", None, raising=False)
-    monkeypatch.setattr(litellm, "openai_key", None, raising=False)
-
-    managed_files = PROXY_LiteLLMManagedFiles(
-        internal_usage_cache=MagicMock(), prisma_client=MagicMock()
-    )
-    managed_files.prisma_client.db.litellm_managedfiletable = _ManagedFileTableOverRows(rows)
-
-    proxy_logging_obj = setup_proxy_logging_object(monkeypatch, llm_router)
-    proxy_logging_obj.proxy_hook_mapping["managed_files"] = managed_files
-    proxy_logging_obj.update_request_status = mocker.AsyncMock()
-    proxy_logging_obj.post_call_success_hook = mocker.AsyncMock(return_value=None)
-    proxy_logging_obj.post_call_failure_hook = mocker.AsyncMock()
-    monkeypatch.setattr("litellm.proxy.proxy_server.master_key", None)
-    monkeypatch.setattr("litellm.proxy.proxy_server.prisma_client", None)
-    monkeypatch.setattr("litellm.proxy.proxy_server.llm_router", llm_router)
-
-    provider_list = mocker.patch.object(litellm, "afile_list", new=mocker.AsyncMock())
-
-    app.dependency_overrides[ps.user_api_key_auth] = lambda: UserAPIKeyAuth(
-        api_key="test-key",
-        user_role=LitellmUserRoles.INTERNAL_USER,
-        user_id="test-user",
-    )
-    return proxy_logging_obj, provider_list
 
 
-def test_unscoped_list_files_reads_the_store_without_any_provider_key(
-    mocker: MockerFixture, monkeypatch, llm_router: Router
-):
-    """The exact shape `client.files.list()` produces, with no target_model_names, no
-    provider and no OPENAI_API_KEY in the process, must return the caller's managed
-    files instead of falling through to a keyless provider client (#35362)."""
-    proxy_logging_obj, provider_list = _setup_unscoped_list_files_route_over_real_hook(
-        mocker, monkeypatch, llm_router, [_managed_file_row("unified-file-1")]
-    )
-
-    response = _get_unscoped_list_files("")
-
-    assert response.status_code == 200, response.text
-    assert [file["id"] for file in response.json()["data"]] == ["unified-file-1"]
-    provider_list.assert_not_awaited()
-    proxy_logging_obj.post_call_failure_hook.assert_not_called()
 
 
-def test_unscoped_list_files_returns_unified_ids_for_rows_storing_a_raw_provider_id(
-    mocker: MockerFixture, monkeypatch, llm_router: Router
-):
-    """Batch output rows store the provider's file object, whose id is a raw `file-`
-    the caller cannot act on. The listing hands back the row's unified id so
-    files.retrieve and files.content work on what it returned."""
-    _setup_unscoped_list_files_route_over_real_hook(
-        mocker,
-        monkeypatch,
-        llm_router,
-        [_managed_file_row("unified-batch-output", stored_file_id="file-raw-provider-123")],
-    )
-
-    response = _get_unscoped_list_files("")
-
-    assert response.status_code == 200, response.text
-    assert [file["id"] for file in response.json()["data"]] == ["unified-batch-output"]
-    assert response.json()["data"][0]["filename"] == "batch.jsonl"
 
 
-def test_unscoped_list_files_does_not_leak_another_callers_files(
-    mocker: MockerFixture, monkeypatch, llm_router: Router
-):
-    """Listing without a model pinned is still owner-scoped."""
-    _setup_unscoped_list_files_route_over_real_hook(
-        mocker,
-        monkeypatch,
-        llm_router,
-        [
-            _managed_file_row("unified-mine"),
-            _managed_file_row("unified-theirs", created_by="other-user"),
-        ],
-    )
-
-    response = _get_unscoped_list_files("")
-
-    assert response.status_code == 200, response.text
-    assert [file["id"] for file in response.json()["data"]] == ["unified-mine"]
 
 
-def test_scoped_list_files_still_resolves_deployment_credentials(
-    mocker: MockerFixture, monkeypatch, llm_router: Router
-):
-    """target_model_names keeps routing to the provider on deployment credentials, so
-    the unscoped path does not swallow that route."""
-    _, provider_list = _setup_unscoped_list_files_route_over_real_hook(
-        mocker, monkeypatch, llm_router, [_managed_file_row("unified-file-1")]
-    )
-    provider_list.return_value = []
-
-    response = _get_unscoped_list_files("?target_model_names=gpt-3.5-turbo")
-
-    assert response.status_code == 200, response.text
-    provider_list.assert_awaited_once()
-    assert provider_list.await_args.kwargs["custom_llm_provider"] == "openai"
-    assert provider_list.await_args.kwargs["api_key"] == "openai_api_key"
 
 
 def _post_user_data_file() -> httpx.Response:

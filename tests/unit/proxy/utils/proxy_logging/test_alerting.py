@@ -136,25 +136,8 @@ async def test_budget_alerts_webhook_only_forwards_to_slack_alerting_instance(pr
     assert snapshot == {"type": "user_budget", "user_info_is_callinfo": True, "user_id": "u1"}
 
 
-@pytest.mark.asyncio
-async def test_budget_alerts_email_only_skips_slack_alerting_instance(proxy_logging):
-    proxy_logging.alerting = ["email"]
-    proxy_logging.slack_alerting_instance = MagicMock(budget_alerts=AsyncMock())
-    proxy_logging.email_logging_instance = MagicMock(budget_alerts=AsyncMock())
-    await proxy_logging.budget_alerts(type="user_budget", user_info=_user_info())
-    proxy_logging.slack_alerting_instance.budget_alerts.assert_not_called()
-    proxy_logging.email_logging_instance.budget_alerts.assert_called_once()
 
 
-@pytest.mark.asyncio
-async def test_budget_alerts_soft_budget_with_alert_emails_bypasses_global(proxy_logging):
-    proxy_logging.alerting = None
-    proxy_logging.slack_alerting_instance = MagicMock(budget_alerts=AsyncMock())
-    proxy_logging.email_logging_instance = MagicMock(budget_alerts=AsyncMock())
-    info = _user_info(alert_emails=["a@b.c"])
-    await proxy_logging.budget_alerts(type="soft_budget", user_info=info)
-    proxy_logging.email_logging_instance.budget_alerts.assert_called_once()
-    proxy_logging.slack_alerting_instance.budget_alerts.assert_not_called()
 
 
 @pytest.mark.asyncio

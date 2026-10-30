@@ -145,10 +145,9 @@ def test_initialize_guardrail_invalid_on_failure():
     [
         ("pre_call", True, False),
         (["pre_call", "post_call"], True, True),
-        (Mode(tags={"judge": ["pre_call"]}, default="post_call"), True, False),
         (None, False, True),
     ],
-    ids=["scalar", "list", "tagged", "missing"],
+    ids=["scalar", "list", "missing"],
 )
 def test_initialize_guardrail_preserves_every_mode_shape(
     mode: str | list[str] | Mode | None,

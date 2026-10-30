@@ -1214,22 +1214,6 @@ class CustomGuardrail(CustomLogger):
 
         if self.default_on is True and disable_global_guardrail is not True:
             if self._event_hook_is_event_type(event_type):
-                if isinstance(self.event_hook, Mode):
-                    try:
-                        from litellm_enterprise.integrations.custom_guardrail import (
-                            EnterpriseCustomGuardrailHelper,
-                        )
-                    except ImportError:
-                        raise ImportError(
-                            "Setting tag-based guardrails is only available in litellm-enterprise. You must be a premium user to use this feature."
-                        )
-                    result = EnterpriseCustomGuardrailHelper._should_run_if_mode_by_tag(
-                        data, self.event_hook, event_type
-                    )
-                    if result is not None:
-                        tagged_result: Final[bool] = bool(cast(object, result))  # cast-ok: helper return
-                        data_obj: Final[object] = cast(object, data)  # cast-ok: data param
-                        return tagged_result and self.stream_scope_allows(data_obj, event_type)
                 return self.stream_scope_allows(cast(object, data), event_type)  # cast-ok: data param
             return False
 
@@ -1243,19 +1227,6 @@ class CustomGuardrail(CustomLogger):
         if not self._event_hook_is_event_type(event_type):
             return False
 
-        if isinstance(self.event_hook, Mode):
-            try:
-                from litellm_enterprise.integrations.custom_guardrail import (
-                    EnterpriseCustomGuardrailHelper,
-                )
-            except ImportError:
-                raise ImportError(
-                    "Setting tag-based guardrails is only available in litellm-enterprise. You must be a premium user to use this feature."
-                )
-            result = EnterpriseCustomGuardrailHelper._should_run_if_mode_by_tag(data, self.event_hook, event_type)
-            if result is not None:
-                mode_tag_result: Final[bool] = bool(cast(object, result))  # cast-ok: helper return
-                return mode_tag_result and self.stream_scope_allows(cast(object, data), event_type)  # cast-ok: data
         return self.stream_scope_allows(cast(object, data), event_type)  # cast-ok: data param
 
     def _event_hook_is_event_type(self, event_type: GuardrailEventHooks) -> bool:

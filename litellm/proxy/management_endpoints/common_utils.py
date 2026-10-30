@@ -74,9 +74,6 @@ if TYPE_CHECKING:
 
 _user_has_admin_view: Final = user_api_key_has_admin_view
 
-# TODO: drop once the litellm-enterprise pin moves past 0.1.71, which imports this name
-_is_user_team_admin: Final = is_team_admin
-
 
 def validate_team_model_max_budget(
     model_max_budget: Mapping[str, BudgetConfig] | None,

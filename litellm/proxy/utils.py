@@ -95,25 +95,6 @@ from litellm.types.proxy.model_listing import ModelInfoResponse
 from litellm.types.utils import MCP_GUARDRAIL_CALL_TYPES, CallTypes, CallTypesLiteral, ModelInfo, Usage
 
 try:
-    from litellm_enterprise.enterprise_callbacks.send_emails.base_email import (
-        BaseEmailLogger,
-    )
-    from litellm_enterprise.enterprise_callbacks.send_emails.resend_email import (
-        ResendEmailLogger,
-    )
-    from litellm_enterprise.enterprise_callbacks.send_emails.sendgrid_email import (
-        SendGridEmailLogger,
-    )
-    from litellm_enterprise.enterprise_callbacks.send_emails.smtp_email import (
-        SMTPEmailLogger,
-    )
-except ImportError:
-    BaseEmailLogger = None
-    SendGridEmailLogger = None
-    SMTPEmailLogger = None
-    ResendEmailLogger = None
-
-try:
     import backoff
 except ImportError:
     raise ImportError("backoff is not installed. Please install it via 'pip install backoff'")
@@ -382,33 +363,6 @@ def print_verbose(print_statement: object):
     verbose_proxy_logger.debug("%s\n%s", print_statement, traceback.format_exc())
     if litellm.set_verbose:
         print(f"LiteLLM Proxy: {redact_string(str(print_statement))}")  # noqa: T201
-
-
-def _get_email_logger_class():
-    """
-    Determine which email logger class to use based on environment variables.
-    Priority: SendGrid > Resend > SMTP > BaseEmailLogger (fallback)
-
-    Returns:
-        The email logger class to use, or None if BaseEmailLogger is not available
-    """
-    if BaseEmailLogger is None:
-        return None
-
-    # Check for SendGrid API key
-    if SendGridEmailLogger is not None and os.getenv("SENDGRID_API_KEY"):
-        return SendGridEmailLogger
-
-    # Check for Resend API key
-    if ResendEmailLogger is not None and os.getenv("RESEND_API_KEY"):
-        return ResendEmailLogger
-
-    # Check for SMTP configuration
-    if SMTPEmailLogger is not None and os.getenv("SMTP_HOST"):
-        return SMTPEmailLogger
-
-    # Fallback to BaseEmailLogger (though it won't actually send emails)
-    return BaseEmailLogger
 
 
 class InternalUsageCache:
@@ -1616,14 +1570,6 @@ class ProxyLogging:
             alerting=self.alerting,
             internal_usage_cache=self.internal_usage_cache.dual_cache,
         )
-        self.email_logging_instance: Any | None = None
-        if BaseEmailLogger is not None:
-            email_logger_class: Final = _get_email_logger_class()
-            if email_logger_class is not None:
-                # All email logger classes now accept internal_usage_cache
-                self.email_logging_instance = email_logger_class(
-                    internal_usage_cache=self.internal_usage_cache.dual_cache,
-                )
         self.premium_user = premium_user
         self.service_logging_obj = ServiceLogging()
         self.db_spend_update_writer = DBSpendUpdateWriter()
@@ -3500,34 +3446,13 @@ class ProxyLogging:
         ],
         user_info: CallInfo,
     ):
-        # For soft_budget alerts with alert_emails set, allow email sending even if alerting is None
-        # This enables team-specific soft budget email alerts via metadata.soft_budget_alerting_emails
-        # Note: user_info is a CallInfo that can represent user/team/org level info. For team budgets,
-        # alert_emails is populated from team_object.metadata.soft_budget_alerting_emails (see auth_checks.py)
-        is_soft_budget_with_alert_emails: Final = (
-            type == "soft_budget" and user_info.alert_emails is not None and len(user_info.alert_emails) > 0
-        )
-
-        if self.alerting is None and not is_soft_budget_with_alert_emails:
-            # do nothing if alerting is not switched on (unless it's a soft_budget alert with team-specific emails)
+        if self.alerting is None:
             return
 
-        if self.alerting is not None and (
-            "slack" in self.alerting or "ms_teams" in self.alerting or "webhook" in self.alerting
+        if ("slack" in self.alerting or "ms_teams" in self.alerting or "webhook" in self.alerting) and (
+            self.slack_alerting_instance is not None
         ):
-            if self.slack_alerting_instance is not None:
-                await self.slack_alerting_instance.budget_alerts(
-                    type=type,
-                    user_info=user_info,
-                )
-
-        # Call email_logging_instance if:
-        # 1. "email" is in alerting config, OR
-        # 2. It's a soft_budget alert with team-specific alert_emails (bypasses global alerting config)
-        should_send_email = (self.alerting is not None and "email" in self.alerting) or is_soft_budget_with_alert_emails
-
-        if should_send_email and self.email_logging_instance is not None:
-            await self.email_logging_instance.budget_alerts(
+            await self.slack_alerting_instance.budget_alerts(
                 type=type,
                 user_info=user_info,
             )

@@ -959,18 +959,7 @@ class _BackgroundCostCheck(Protocol):
 
 
 def _background_cost_check() -> _BackgroundCostCheck | None:
-    from litellm.proxy.proxy_server import llm_router, prisma_client, proxy_logging_obj
-
-    if prisma_client is None or llm_router is None:
-        return None
-    try:
-        from litellm_enterprise.proxy.common_utils.check_responses_cost import CheckResponsesCost
-    except ImportError:
-        return None
-
-    return CheckResponsesCost(  # pyright: ignore[reportUnknownVariableType]  # litellm_enterprise is absent from the type-check venv
-        proxy_logging_obj=proxy_logging_obj, prisma_client=prisma_client, llm_router=llm_router
-    )
+    return None
 
 
 _BillingSettlement: TypeAlias = Callable[[_BackgroundCostCheck], Awaitable[_BilledCharge | None]]

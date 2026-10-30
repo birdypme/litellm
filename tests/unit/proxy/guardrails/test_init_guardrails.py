@@ -241,7 +241,6 @@ def test_initialize_presidio_forwards_analyze_chunk_size_bytes():
     [
         ("pre_mcp_call", None, False),
         (["pre_mcp_call", "post_mcp_call"], None, False),
-        ({"tags": {"team:mcp": "pre_mcp_call"}, "default": ["pre_mcp_call", "post_mcp_call"]}, None, False),
         ({"tags": {"team:mcp": ["pre_mcp_call"]}, "default": "pre_call"}, None, True),
         ({"tags": {}}, None, False),
         ("pre_mcp_call", "both", True),
@@ -510,15 +509,9 @@ def test_init_guardrails_v2_skips_guardrail_with_malformed_advisory_template():
 @pytest.mark.parametrize(
     "mode,tags,restore,scope,tokens,expected,expected_calls",
     [
-        ({"tags": {"team:mcp": "pre_mcp_call"}, "default": "pre_call"}, ["team:mcp"], False, None, {}, "raw", 0),
-        ({"tags": {"team:mcp": "pre_mcp_call"}, "default": "pre_call"}, ["other"], False, None, {}, "masked", 1),
-        ({"tags": {"team:mcp": "pre_mcp_call"}, "default": "pre_call"}, [], False, None, {}, "masked", 1),
-        ({"tags": {"team:mcp": "pre_mcp_call"}}, [], False, None, {}, "raw", 0),
         ("pre_mcp_call", [], True, None, {}, "raw", 1),
         ("pre_mcp_call", [], True, None, {"restored": "twice", "raw": "restored"}, "restored", 1),
         ("pre_mcp_call", [], False, "output", {"raw": "restored"}, "masked", 1),
-        ({"tags": {"team:mcp": "pre_mcp_call"}}, ["team:mcp"], False, "output", {}, "masked", 1),
-        ({"tags": {"team:mcp": "pre_mcp_call"}}, [], False, "output", {}, "raw", 0),
     ],
 )
 async def test_presidio_initialized_output_dispatch(

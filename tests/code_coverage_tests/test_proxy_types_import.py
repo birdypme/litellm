@@ -3,15 +3,12 @@ import sys
 from pathlib import Path
 from typing import Final
 
-import pytest
 
 
 _REPO_ROOT: Final = Path(__file__).resolve().parents[2]
 
 
-def _run_import_check(
-    block_enterprise: bool, repo_root: Path
-) -> subprocess.CompletedProcess[str]:
+def _run_import_check(repo_root: Path) -> subprocess.CompletedProcess[str]:
     program: Final = f"""
 import importlib.abc
 import pathlib
@@ -22,8 +19,6 @@ repo_root = sys.argv[1]
 
 class ImportTracer(importlib.abc.MetaPathFinder):
     def find_spec(self, name, path, target=None):
-        if {block_enterprise!r} and name.startswith("litellm_enterprise"):
-            raise ImportError("blocked litellm_enterprise imports")
         if name == "litellm.proxy._types":
             repository_frames = [
                 frame for frame in traceback.extract_stack()
@@ -82,9 +77,8 @@ print("UserAPIKeyAuth identity: True")
     )
 
 
-@pytest.mark.parametrize("block_enterprise", (False, True))
-def test_import_litellm_does_not_load_proxy_types(block_enterprise: bool) -> None:
-    result: Final = _run_import_check(block_enterprise, _REPO_ROOT)
+def test_import_litellm_does_not_load_proxy_types() -> None:
+    result: Final = _run_import_check(_REPO_ROOT)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "_types loaded: False" in result.stdout, result.stdout + result.stderr
 

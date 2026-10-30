@@ -355,14 +355,6 @@ class TestUserHasAdminView:
         assert user_api_key_has_admin_view(auth_user) is False
 
 
-def test_published_enterprise_import_of_team_admin_check_still_answers():
-    from litellm.proxy.management_endpoints.common_utils import _is_user_team_admin
-
-    team = LiteLLM_TeamTable(team_id="t1", members_with_roles=[Member(user_id="admin", role="admin")])
-    assert _is_user_team_admin(UserAPIKeyAuth(user_id="admin"), team) is True
-    assert _is_user_team_admin(UserAPIKeyAuth(user_id="outsider"), team) is False
-
-
 class TestOrgAdminCanInviteUser:
     """Tests for _org_admin_can_invite_user function."""
 

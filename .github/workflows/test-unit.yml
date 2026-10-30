@@ -155,17 +155,8 @@ jobs:
               tests/unit/router_strategy
               tests/unit/router_utils
               tests/unit/proxy/common_utils/test_cache_aware_routing.py
-              tests/unit/enterprise/enterprise_callbacks/send_emails
-              tests/unit/enterprise/proxy/test_afile_retrieve_returns_unified_id.py
               tests/unit/enterprise/proxy/test_batch_retrieve_input_file_id.py
-              tests/unit/enterprise/proxy/test_batch_retrieve_registers_missing_output_file_id.py
               tests/unit/enterprise/proxy/test_batch_retrieve_returns_unified_input_file_id.py
-              tests/unit/enterprise/proxy/test_batch_update_db_managed_output_file_id.py
-              tests/unit/enterprise/proxy/test_deleted_file_returns_403_not_404.py
-              tests/unit/enterprise/proxy/test_enterprise_routes.py
-              tests/unit/enterprise/proxy/test_file_deletion_blocking.py
-              tests/unit/enterprise/proxy/test_managed_files_access_check.py
-              tests/unit/enterprise/proxy/test_managed_files_hook.py
             python-version: "3.12"
             workers: 4
             reruns: 2
@@ -458,10 +449,6 @@ jobs:
 
           - shard: enterprise-repositories-secrets
             test-path: >-
-              tests/unit/enterprise/enterprise_callbacks/test_callback_controls.py
-              tests/unit/enterprise/enterprise_callbacks/test_llm_guard.py
-              tests/unit/enterprise/enterprise_callbacks/test_pagerduty_alerting.py
-              tests/unit/enterprise/enterprise_callbacks/test_secret_detection.py
               tests/unit/integration_support
               tests/unit/models
               tests/unit/repositories
@@ -686,8 +673,6 @@ jobs:
               tests/unit/enterprise/proxy/auth
               tests/unit/enterprise/proxy/guardrails
               tests/unit/enterprise/proxy/management_endpoints
-              tests/unit/enterprise/proxy/test_audit_logging_endpoints.py
-              tests/unit/enterprise/proxy/test_liteadmin.py
               tests/unit/enterprise/enterprise_callbacks/test_prometheus_logging_callbacks.py
             python-version: "3.12"
             workers: 4
@@ -1071,7 +1056,7 @@ jobs:
             --timeout="${TEST_TIMEOUT_SECONDS}" \
             --rerun-except "from pytest-timeout" \
             --durations=20 \
-            --cov=./litellm --cov=./enterprise/litellm_enterprise \
+            --cov=./litellm \
             --cov-report=xml:coverage.xml \
             --cov-config=pyproject.toml
           status=$?

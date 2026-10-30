@@ -5,13 +5,9 @@
 ## This tests the llm guard integration
 
 import asyncio
-import random
 
 # What is this?
 ## Unit test for presidio pii masking
-import time
-import traceback
-from datetime import datetime
 
 from dotenv import load_dotenv
 
@@ -24,21 +20,16 @@ from fastapi import Request, Response
 from starlette.datastructures import URL
 
 import litellm
-from litellm import Router, mock_completion
+from litellm import Router
 from litellm.caching.caching import DualCache
 from litellm.integrations.custom_logger import CustomLogger
 from litellm.proxy._types import UserAPIKeyAuth
-from litellm_enterprise.enterprise_callbacks.secret_detection import (
-    _ENTERPRISE_SecretDetection,
-)
 from litellm.proxy.proxy_server import (
-    Depends,
     HTTPException,
     chat_completion,
     completion,
     embeddings,
 )
-from litellm.proxy.utils import ProxyLogging, hash_token
 
 
 class testLogger(CustomLogger):

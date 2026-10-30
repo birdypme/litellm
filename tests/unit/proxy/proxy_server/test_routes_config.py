@@ -13,7 +13,6 @@ Routes covered:
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import json
 from collections.abc import Callable
@@ -1764,87 +1763,6 @@ def test_get_config_callbacks_lists_dict_shaped_config_callbacks(client, auth_as
     assert [(callback["name"], callback.get("read_only", False)) for callback in callbacks] == [("langsmith", False)]
 
 
-def test_get_config_callbacks_excludes_internal_runtime_callbacks(client, auth_as, mock_prisma, monkeypatch):
-    """Proxy infrastructure callbacks are excluded from callback inventory."""
-    from litellm.proxy import proxy_server as ps
-    from litellm.proxy._types import LitellmUserRoles
-
-    _install_litellm_config(mock_prisma)
-    monkeypatch.setattr(ps, "prisma_client", mock_prisma)
-    monkeypatch.setattr(ps, "llm_router", None)
-
-    fake_proxy_config = MagicMock()
-    fake_proxy_config.get_config = AsyncMock(
-        return_value={
-            "litellm_settings": {"success_callback": []},
-            "general_settings": {},
-            "environment_variables": dict(_CALLBACK_ENV_FIXTURE),
-        }
-    )
-    monkeypatch.setattr(ps, "proxy_config", fake_proxy_config)
-
-    from litellm_enterprise.proxy.hooks.managed_files import PROXY_LiteLLMManagedFiles
-
-    import litellm
-    from litellm._service_logger import ServiceLogging
-    from litellm.integrations.custom_guardrail import CustomGuardrail
-    from litellm.integrations.custom_logger import CustomLogger
-    from litellm.integrations.langsmith import LangsmithLogger
-    from litellm.integrations.s3_v2 import S3Logger
-    from litellm.integrations.sqs import SQSLogger
-    from litellm.integrations.vector_store_integrations.vector_store_pre_call_hook import VectorStorePreCallHook
-    from litellm.proxy.hooks.cache_control_check import PROXY_CacheControlCheck
-    from litellm.router import Router
-
-    class _InventoryTestGuardrail(CustomGuardrail):
-        pass
-
-    class _UserCodeLogger(CustomLogger):
-        pass
-
-    def user_code_function(*args, **kwargs):
-        pass
-
-    async def build_aws_loggers() -> tuple[S3Logger, SQSLogger]:
-        return S3Logger(s3_bucket_name="inventory-bucket"), SQSLogger(sqs_queue_url="https://sqs.example/inventory")
-
-    s3_logger, sqs_logger = asyncio.run(build_aws_loggers())
-    router = Router(model_list=[])
-    monkeypatch.setattr(litellm, "input_callback", [])
-    monkeypatch.setattr(
-        litellm, "success_callback", [LangsmithLogger(), s3_logger, router.sync_deployment_callback_on_success]
-    )
-    monkeypatch.setattr(litellm, "_async_success_callback", [sqs_logger, router.deployment_callback_on_success])
-    monkeypatch.setattr(litellm, "failure_callback", [user_code_function])
-    monkeypatch.setattr(litellm, "_async_failure_callback", [router.async_deployment_callback_on_failure])
-    monkeypatch.setattr(
-        litellm,
-        "callbacks",
-        [
-            PROXY_CacheControlCheck(),
-            PROXY_LiteLLMManagedFiles(internal_usage_cache=MagicMock(), prisma_client=MagicMock()),
-            ServiceLogging(),
-            VectorStorePreCallHook(),
-            _InventoryTestGuardrail(guardrail_name="inventory-test-guardrail"),
-            _UserCodeLogger(),
-        ],
-    )
-    monkeypatch.setattr(litellm, "cache", litellm.Cache(type="local"))
-    assert "cache" in litellm.success_callback and "cache" in litellm._async_success_callback
-
-    with auth_as(LitellmUserRoles.PROXY_ADMIN):
-        response = client.get("/get/config/callbacks")
-
-    assert response.status_code == 200
-    assert [
-        (callback["name"], callback["type"], callback["read_only"]) for callback in response.json()["callbacks"]
-    ] == [
-        ("_UserCodeLogger", "success_and_failure", True),
-        ("langsmith", "success", True),
-        ("s3", "success", True),
-        ("sqs", "success", True),
-        ("user_code_function", "failure", True),
-    ]
 
 
 def test_get_config_callbacks_redacts_runtime_only_row_secrets_for_view_only_admin(
