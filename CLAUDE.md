@@ -41,5 +41,4 @@ Cross-cutting points that span files:
 - Lint gates (ruff strict, type discipline, test quality, openapi docs, basedpyright) compare per-rule counts against the merge-base, so a branch may not increase any rule's count. `reportAny`/`reportExplicitAny` share a fixed cap in `ANY_CAPS` in `scripts/type_check_gate.py`. Never raise it on a feature branch
 - Suppressions must name the exact rule and give a reason (`# pyright: ignore[rule]  # reason`). `# type: ignore` is banned
 - New code follows the style in `AGENTS.md`: `Final` on every variable, frozen pydantic models and dataclasses, `ReadOnly` TypedDict fields, no mutation, no `Any`, failures as values, and no comments unless required
-- `ARCHITECTURE.md` still references an `enterprise/` directory that was removed from the repo, so verify paths there before relying on them
 - Commit and push when done, using conventional commit messages
