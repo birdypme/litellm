@@ -1268,6 +1268,37 @@ async def test_upsert_sso_user_fills_user_alias_for_existing_user():
 
 
 @pytest.mark.asyncio
+async def test_insert_sso_user_is_not_capped_without_a_license(monkeypatch: pytest.MonkeyPatch) -> None:
+    from litellm.proxy._types import NewUserRequest, NewUserResponse, SSOUserDefinedValues
+    from litellm.proxy.management_endpoints.types import CustomOpenID
+    from litellm.repositories.user_repository import _FREE_SSO_CREATION
+
+    monkeypatch.setattr("litellm.proxy.proxy_server.premium_user", False)
+    scopes: list[object] = []
+
+    async def fake_new_user(data: NewUserRequest, user_api_key_dict: object) -> NewUserResponse:
+        scopes.append(_FREE_SSO_CREATION.get())
+        return NewUserResponse(user_id=data.user_id or "", key="sk-xxxxx", teams=None)
+
+    user_defined_values: SSOUserDefinedValues = {
+        "models": [],
+        "user_id": "sixth-user",
+        "user_email": "sixth@example.com",
+        "max_budget": None,
+        "user_role": "internal_user",
+        "budget_duration": None,
+    }
+    sso_result = CustomOpenID(
+        id="sixth-user", email="sixth@example.com", display_name="Sixth", provider="generic", team_ids=[]
+    )
+
+    with patch("litellm.proxy.management_endpoints.ui_sso.new_user", fake_new_user):
+        await insert_sso_user(result_openid=sso_result, user_defined_values=user_defined_values)
+
+    assert scopes == [None]
+
+
+@pytest.mark.asyncio
 async def test_insert_sso_user_sets_user_alias_from_display_name():
     """
     A newly created SSO user is inserted with the IdP display name as user_alias.

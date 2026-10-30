@@ -152,7 +152,7 @@ from litellm.proxy.utils import (
 from litellm.repositories.prisma_protocols import TableActions
 from litellm.repositories.table_repositories import SSOConfigRepository
 from litellm.repositories.team_repository import TeamRepository
-from litellm.repositories.user_repository import UserRepository, free_sso_user_creation
+from litellm.repositories.user_repository import UserRepository
 from litellm.secret_managers.main import get_secret_bool, get_secret_str
 from litellm.types.llms.base import LiteLLMBaseModel
 from litellm.types.proxy.management_endpoints.ui_sso import *  # noqa: F403
@@ -1074,10 +1074,6 @@ async def _verify_generic_sso_or_fall_back_to_id_token(
         )
 
 
-class _SSOUserAdmissionError(ProxyException):
-    pass
-
-
 @router.get("/sso/key/generate", tags=["experimental"], include_in_schema=False)
 async def google_login(
     request: Request,
@@ -1924,8 +1920,6 @@ async def get_user_info_from_db(
         )
 
         return user_info
-    except _SSOUserAdmissionError:
-        raise
     except Exception as e:
         if resolved_by_database_only and PrismaDBExceptionHandler.is_database_service_unavailable_error_in_chain(e):
             verbose_proxy_logger.exception("SSO login failed: the database could not resolve the account: %s", e)
@@ -2781,20 +2775,10 @@ async def insert_sso_user(
     if result_openid and hasattr(result_openid, "provider"):
         new_user_request.metadata = {"auth_provider": getattr(result_openid, "provider")}
 
-    from litellm.proxy.proxy_server import premium_user
-
-    with free_sso_user_creation(new_user_request.user_id, enabled=premium_user is not True):
-        try:
-            return await new_user(
-                data=new_user_request,
-                user_api_key_dict=UserAPIKeyAuth(user_role=LitellmUserRoles.PROXY_ADMIN),
-            )
-        except ProxyException as error:
-            if premium_user is True:
-                raise
-            raise _SSOUserAdmissionError(
-                message=error.message, type=error.type, param=error.param, code=error.code
-            ) from error
+    return await new_user(
+        data=new_user_request,
+        user_api_key_dict=UserAPIKeyAuth(user_role=LitellmUserRoles.PROXY_ADMIN),
+    )
 
 
 DefaultTeamJoin: TypeAlias = Callable[
@@ -3535,8 +3519,6 @@ class SSOAuthenticationHandler:
                     prisma_client=prisma_client,
                 )
             return user_info
-        except _SSOUserAdmissionError:
-            raise
         except Exception as e:
             if (
                 user_info is None
@@ -4972,21 +4954,9 @@ async def debug_sso_login(request: Request):
     """
     _raise_if_sso_debug_disabled()
 
-    from litellm.proxy.proxy_server import premium_user
-
     microsoft_client_id: Final = os.getenv("MICROSOFT_CLIENT_ID", None)
     google_client_id: Final = os.getenv("GOOGLE_CLIENT_ID", None)
     generic_client_id: Final = os.getenv("GENERIC_CLIENT_ID", None)
-
-    ####### Check if user is a Enterprise / Premium User #######
-    if microsoft_client_id is not None or google_client_id is not None or generic_client_id is not None:
-        if premium_user is not True:
-            raise ProxyException(
-                message="You must be a LiteLLM Enterprise user to use SSO. If you have a license please set `LITELLM_LICENSE` in your env. If you want to obtain a license meet with us here: https://enterprise.litellm.ai/demo You are seeing this error message because You set one of `MICROSOFT_CLIENT_ID`, `GOOGLE_CLIENT_ID`, or `GENERIC_CLIENT_ID` in your env. Please unset this",
-                type=ProxyErrorTypes.auth_error,
-                param="premium_user",
-                code=status.HTTP_403_FORBIDDEN,
-            )
 
     # get url from request
     redirect_url: Final = SSOAuthenticationHandler.get_redirect_url_for_sso(
